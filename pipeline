@@ -1,0 +1,176 @@
+pipeline {
+    agent any
+    
+    stages {
+        stage('Clone Repository') {
+            steps {
+                script {
+                    // Clean workspace
+                    deleteDir()
+                    
+                    // Use credentials binding to access the GitHub PAT
+                    withCredentials([usernamePassword(credentialsId: 'Seif2024DevOps', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                        // Clone repository using token in URL
+                        sh "git clone https://oauth2:${PASSWORD}@github.com/RahmouniSeif/Skieur.git"
+                    }
+                }
+            }
+        }
+        
+        stage('Maven Clean') {
+            steps {
+                dir("Skieur") {
+                    sh 'mvn clean'
+                }
+            }
+        }
+        
+        stage('Maven Compile') {
+            steps {
+                dir("Skieur") {
+                    sh 'mvn compile'
+                }
+            }
+        }
+        
+        stage('Test JUnit') {
+            steps {
+                dir("Skieur") {
+                    sh 'mvn test -Dtest=PisteServicesImplTest'
+                }
+            }
+        }
+        
+        stage('Maven Build') {
+            steps {
+                dir("Skieur") {
+                    sh 'mvn clean install -DskipTests'
+                }
+            }
+        }
+        
+        stage('Sonarqube') {
+            steps {
+                dir("Skieur") {
+                    sh 'mvn sonar:sonar -Dsonar.host.url=http://192.168.33.10:9000/ -Dsonar.login=admin -Dsonar.password=0000'
+                }
+            }
+        }
+
+        
+        stage('Nexus Deployment') {
+            steps {
+                dir("Skieur") {
+                    // Update Nexus server URL
+                    sh 'mvn deploy -DskipTests -DaltDeploymentRepository=deploymentRepo::default::http://192.168.33.10:8081/repository/maven-releases/'
+                }
+            }
+        }
+        
+        stage('Building Image') {
+            steps {
+                dir("Skieur") {
+                sh 'docker build -t seifrahmouni/ski-demo .'
+                }
+            }            
+        }
+        
+        stage('Push Image to DockerHub') {
+            steps {
+                script {
+                    sh("docker login -u 'seifrahmouni' -p Vapresso1234")
+                    sh('docker push seifrahmouni/ski-demo')
+                }
+            }           
+        } 
+        
+          stage('Docker Compose') {
+              steps {
+                   dir("Skieur") {
+                    script {
+                        sh 'docker compose down'
+                        sh 'docker compose up -d'
+                  }               
+                }
+                   
+               }
+           }        
+        
+        stage('Run Prometheus') {
+            steps {
+                script {
+                    // Check if the container with ID 59f6cc6969b0 is running
+                    def isRunning = sh(script: 'docker inspect -f "{{.State.Running}}" prometheus', returnStatus: true)
+                    if (isRunning == true) {
+                        echo 'Container of Prometheus is already running.'
+                    } else {
+                        // Start the container if it's not running
+                        sh 'docker start prometheus'
+                        echo 'Container of Prometheus has been started.'
+                    }
+                }
+            }
+        }
+        
+        stage('Run Grafana') {
+            steps {
+                script {
+                    // Check if the container with Name grafana is running
+                    def isRunning = sh(script: 'docker inspect -f "{{.State.Running}}" grafana', returnStatus: true)
+                    if (isRunning == true) {
+                        echo 'Container of Grafana is already running.'
+                    } else {
+                        // Start the container if it's not running
+                        sh 'docker start grafana'
+                        echo 'Container of Grafana has been started.'
+                    }
+                }
+            }
+        }
+    }
+post {
+   always {
+       emailext (
+           subject: "Pipeline Status: ${BUILD_NUMBER}",
+           body: '''<html>
+                      <head>
+                          <style>
+                              body {
+                                  font-family: Arial, sans-serif;
+                                  color: #333;
+                                  line-height: 1.6;
+                              }
+                              .status {
+                                  font-size: 18px;
+                                  font-weight: bold;
+                                  color: #007bff;
+                              }
+                              .build-info {
+                                  margin-bottom: 10px;
+                              }
+                              .link {
+                                  color: #007bff;
+                                  text-decoration: none;
+                              }
+                              .link:hover {
+                                  text-decoration: underline;
+                              }
+                          </style>
+                      </head>
+                      <body>
+                          <p class="status">Build Status: ${BUILD_STATUS}</p>
+                          <div class="build-info">
+                              <p>Build Number: ${BUILD_NUMBER}</p>
+                              <p>Check the <a class="link" href="${BUILD_URL}">cosol output</a>.</p>
+                          </div>
+                      </body>
+                   </html>''',
+           to: 'seif.rahmouni@esprit.tn',
+           from: 'seif.rahmouni@esprit.tn',
+           replyTo: 'seif.rahmouni@esprit.tn',
+           mimeType: 'text/html'
+       )
+   } 
+}
+
+}
