@@ -1,0 +1,7 @@
+version: "2"
+services:
+  seifcontainer:
+    image: seifcontainer
+    container_name: seifcontainer
+    ports:
+      - "8089:8089"
